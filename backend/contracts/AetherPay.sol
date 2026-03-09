@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {IPool} from "@aave/core-v3/contracts/interfaces/IPool.sol";
+
+error AetherPay__ZeroAddress();
+error AetherPay__InvalidMerchant();
+error AetherPay__ZeroAmount();
+error AetherPay__InsufficientShares();
+
+/**
+ * @title Aether Pay - Auto-Yield Payment Gateway
+ * @author Aether Blue / Jonathan Evan
+ * @dev Architecture Vault Non-Custodial integrated with Aave V3
+ */
+contract AetherPay is ReentrancyGuard, Ownable, Pausable {
+    // Make sure Transfer Token not failed
+    using SafeERC20 for IERC20;
+
+    // ==========================================
+    // 1. INFRASTRUCTURE AAVE & TOKEN (Immutable = Cheap Gas)
+    // ==========================================
+    IERC20 public immutable i_usdc;
+    IERC20 public immutable i_aUsdc;
+    IPool public immutable i_aavePool;
+
+    // ==========================================
+    // 2. PARAMETER BUSINESS ($1M Engine)
+    // ==========================================
+    address public s_treasury; // Company Wallet
+    uint256 public constant PROTOCOL_FEE_BPS = 1000; // 10% in Basis Points (10,000 = 100%)
+
+    // ==========================================
+    // 3. ACCOUNTANT SYSTEM (System Shares)
+    // ==========================================
+    mapping(address => uint256) public s_merchantShares;
+    mapping(address => uint256) public s_merchantPrincipal; // Principal Money
+    uint256 public s_totalShares;
+
+    // ==========================================
+    // 4. EVENTS
+    // ==========================================
+    event PaymentSuccess(
+        address indexed merchant,
+        address indexed buyer,
+        uint256 amount,
+        string orderId
+    );
+    event WithdrawnSuccess(address indexed merchant, uint256 userPayout, uint256 protocolFee);
+    event TreasuryUpdated(address oldTreasury, address newTreasury);
+
+    constructor(
+        address _usdc,
+        address _aUsdc,
+        address _aavePool,
+        address _treasury
+    ) Ownable(msg.sender) {
+        if (
+            _usdc == address(0) ||
+            _aUsdc == address(0) ||
+            _aavePool == address(0) ||
+            _treasury == address(0)
+        ) {
+            revert AetherPay__ZeroAddress();
+        }
+        i_usdc = IERC20(_usdc);
+        i_aUsdc = IERC20(_aUsdc);
+        i_aavePool = IPool(_aavePool);
+        s_treasury = _treasury;
+    }
+
+    /**
+     * @dev Core Engine: Withdraw buyer's money, deposit to Aave, mint shares to merchant
+     * @param merchant Seller wallet address
+     * @param amount Amount USDC
+     * @param orderId Order ID from merchant backend (For confirmation delivery)
+     */
+    function pay(address merchant, uint256 amount, string calldata orderId) external nonReentrant whenNotPaused {
+        if (merchant == address(0)) revert AetherPay__InvalidMerchant();
+        if (amount == 0) revert AetherPay__ZeroAmount();
+
+        // 1. Count total asset before inflow fund
+        uint256 totalAssetsBefore = totalAssets();
+
+        // 2. Withdraw fund from buyer wallet into AetherPay contract
+        // Make sure buyer already called function "approve()" in frontend before this
+        i_usdc.safeTransferFrom(msg.sender, address(this), amount);
+
+        // 3. Give permission (Approve) Aave to get fund from this contract
+        i_usdc.safeIncreaseAllowance(address(i_aavePool), amount);
+
+        // 4. Deposit (Supply) fund to Aave V3
+        // onBehalfOf = address(this) -> AetherPay holds the right to aUSDC, merchants are not
+        i_aavePool.supply(address(i_usdc), amount, address(this), 0);
+
+        // 5. Calculate Shares (Ownership Unit)
+        uint256 sharesToMint;
+        if (s_totalShares == 0 || totalAssetsBefore == 0) {
+            // If this is a first transaction in protocol, 1 Share = 1 USDC
+            sharesToMint = amount;
+        } else {
+            // If already exist yield in protocol, use precentage rasio
+            sharesToMint = (amount * s_totalShares) / totalAssetsBefore;
+        }
+
+        // 6. Update State
+        s_merchantShares[merchant] += sharesToMint;
+        s_merchantPrincipal[merchant] += amount;
+        s_totalShares += sharesToMint;
+
+        // 7. Emit event for merchant backend know if the order already paid
+        emit PaymentSuccess(merchant, msg.sender, amount, orderId);
+    }
+
+    /**
+     * @dev Money Printing & Disbursement Machine. Separates principal and interest, then deducts fees.
+     * @param sharesToWithdraw amount of Shares want withdrawn by merchant
+     */
+    function withdraw(uint256 sharesToWithdraw) external nonReentrant whenNotPaused {
+        if (sharesToWithdraw == 0) revert AetherPay__ZeroAmount();
+        if (s_merchantShares[msg.sender] < sharesToWithdraw) revert AetherPay__InsufficientShares();
+
+        uint256 totalAssetsBefore = totalAssets();
+
+        // 1. Calculation of the total value (principal + interest) of the shares currently withdrawn
+        uint256 assetsToWithdraw = (sharesToWithdraw * totalAssetsBefore) / s_totalShares;
+
+        // 2. Calculation of the proportion of Principal Money from the shares
+        uint256 principalToWithdraw = (sharesToWithdraw * s_merchantPrincipal[msg.sender]) / s_merchantShares[msg.sender];
+
+        // 3. Extraction interest and fee 10%
+        uint256 yield = 0;
+        uint256 fee = 0;
+
+        // Make sure there is no underflow if Aave experiences an anomaly (slash)
+        if (assetsToWithdraw > principalToWithdraw) {
+            yield = assetsToWithdraw - principalToWithdraw;
+            fee = (yield * PROTOCOL_FEE_BPS) / 10000;
+        }
+
+        uint256 userPayout = assetsToWithdraw - fee;
+
+        // 4. CEI (Checks-Effects-Interactions) Pattern: Update state before transfer
+        s_merchantShares[msg.sender] -= sharesToWithdraw;
+        s_merchantPrincipal[msg.sender] -= principalToWithdraw;
+        s_totalShares -= sharesToWithdraw;
+
+        // 5. Withdraw USDC from Aave into AetherPay
+        i_aavePool.withdraw(address(i_usdc), assetsToWithdraw, address(this));
+
+        // 6. Distribute the money
+        i_usdc.safeTransfer(msg.sender, userPayout);
+        if (fee > 0) {
+            i_usdc.safeTransfer(s_treasury, fee);
+        }
+
+        emit WithdrawnSuccess(msg.sender, userPayout, fee);
+    }
+
+    /**
+     * @dev Change wallet address of treasury 
+     */
+    function updateTreasury(address newTreasury) external onlyOwner {
+        if (newTreasury == address(0)) revert AetherPay__ZeroAddress();
+        address oldTreasury = s_treasury;
+        s_treasury = newTreasury;
+        emit TreasuryUpdated(oldTreasury, newTreasury);
+    }
+
+    /**
+     * @dev Emergency Button (Circuit Breaker) if Aave is in chaos
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function totalAssets() public view returns (uint256) {
+        return i_aUsdc.balanceOf(address(this));
+    }
+}

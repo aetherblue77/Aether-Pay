@@ -119,7 +119,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
     }
 
     /**
-     * @dev Money Printing & Disbursement Machine. Separates principal and interest, then deducts fees.
+     * @dev Money Printing & Disbursement Machine. Separates principal and yield, then deducts fees.
      * @param sharesToWithdraw amount of Shares want withdrawn by merchant
      */
     function withdraw(uint256 sharesToWithdraw) external nonReentrant whenNotPaused {
@@ -128,13 +128,13 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
 
         uint256 totalAssetsBefore = totalAssets();
 
-        // 1. Calculation of the total value (principal + interest) of the shares currently withdrawn
+        // 1. Calculation of the total value (principal + yield) of the shares currently withdrawn
         uint256 assetsToWithdraw = (sharesToWithdraw * totalAssetsBefore) / s_totalShares;
 
         // 2. Calculation of the proportion of Principal Money from the shares
         uint256 principalToWithdraw = (sharesToWithdraw * s_merchantPrincipal[msg.sender]) / s_merchantShares[msg.sender];
 
-        // 3. Extraction interest and fee 10%
+        // 3. Extraction yield and fee 10%
         uint256 yield = 0;
         uint256 fee = 0;
 

@@ -123,7 +123,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
      * @param sharesToWithdraw amount of Shares want withdrawn by merchant
      */
     function withdraw(uint256 sharesToWithdraw) external nonReentrant whenNotPaused {
-        if (sharesToWithdraw == 0) revert AetherPay__InvalidTreasury();
+        if (sharesToWithdraw == 0) revert AetherPay__ZeroAmount();
         if (s_merchantShares[msg.sender] < sharesToWithdraw) revert AetherPay__InsufficientShares();
 
         uint256 totalAssetsBefore = totalAssets();
@@ -167,7 +167,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
      * @dev Change wallet address of treasury 
      */
     function updateTreasury(address newTreasury) external onlyOwner {
-        if (newTreasury == address(0)) revert AetherPay__ZeroAddress();
+        if (newTreasury == address(0)) revert AetherPay__InvalidTreasury();
         address oldTreasury = s_treasury;
         s_treasury = newTreasury;
         emit TreasuryUpdated(oldTreasury, newTreasury);

@@ -16,7 +16,7 @@ error AetherPay__InsufficientShares();
 
 /**
  * @title Aether Pay - Auto-Yield Payment Gateway
- * @author Aether Blue / Jonathan Evan
+ * @author Jonathan Evan / Joev
  * @dev Architecture Vault Non-Custodial integrated with Aave V3
  */
 contract AetherPay is ReentrancyGuard, Ownable, Pausable {

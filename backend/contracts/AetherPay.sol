@@ -10,6 +10,7 @@ import {IPool} from "@aave/core-v3/contracts/interfaces/IPool.sol";
 
 error AetherPay__ZeroAddress();
 error AetherPay__InvalidMerchant();
+error AetherPay__InvalidTreasury();
 error AetherPay__ZeroAmount();
 error AetherPay__InsufficientShares();
 
@@ -122,7 +123,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
      * @param sharesToWithdraw amount of Shares want withdrawn by merchant
      */
     function withdraw(uint256 sharesToWithdraw) external nonReentrant whenNotPaused {
-        if (sharesToWithdraw == 0) revert AetherPay__ZeroAmount();
+        if (sharesToWithdraw == 0) revert AetherPay__InvalidTreasury();
         if (s_merchantShares[msg.sender] < sharesToWithdraw) revert AetherPay__InsufficientShares();
 
         uint256 totalAssetsBefore = totalAssets();

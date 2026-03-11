@@ -85,22 +85,12 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         if (merchant == address(0)) revert AetherPay__InvalidMerchant();
         if (amount == 0) revert AetherPay__ZeroAmount();
 
-        // 1. Count total asset before inflow fund
+        // 1. Check & Math: Count all at the first time
+        // Count total asset before inflow fund
         uint256 totalAssetsBefore = totalAssets();
-
-        // 2. Withdraw fund from buyer wallet into AetherPay contract
-        // Make sure buyer already called function "approve()" in frontend before this
-        i_usdc.safeTransferFrom(msg.sender, address(this), amount);
-
-        // 3. Give permission (Approve) Aave to get fund from this contract
-        i_usdc.safeIncreaseAllowance(address(i_aavePool), amount);
-
-        // 4. Deposit (Supply) fund to Aave V3
-        // onBehalfOf = address(this) -> AetherPay holds the right to aUSDC, merchants are not
-        i_aavePool.supply(address(i_usdc), amount, address(this), 0);
-
-        // 5. Calculate Shares (Ownership Unit)
         uint256 sharesToMint;
+
+        // Calculate Shares (Ownership Unit)
         if (s_totalShares == 0 || totalAssetsBefore == 0) {
             // If this is a first transaction in protocol, 1 Share = 1 USDC
             sharesToMint = amount;
@@ -109,12 +99,25 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
             sharesToMint = (amount * s_totalShares) / totalAssetsBefore;
         }
 
-        // 6. Update State
+        // 2. EFFECTS: Update state internal first
         s_merchantShares[merchant] += sharesToMint;
         s_merchantPrincipal[merchant] += amount;
         s_totalShares += sharesToMint;
+        
+        // 3. INTERACTIONS: Do transfering and interaction with Aave
+        // Withdraw fund from buyer wallet into AetherPay contract
+        // Make sure buyer already called function "approve()" in frontend before this
+        i_usdc.safeTransferFrom(msg.sender, address(this), amount);
 
-        // 7. Emit event for merchant backend know if the order already paid
+        // Give permission (Approve) Aave to get fund from this contract
+        i_usdc.safeIncreaseAllowance(address(i_aavePool), amount);
+
+        // Deposit (Supply) fund to Aave V3
+        // onBehalfOf = address(this) -> AetherPay holds the right to aUSDC, merchants are not
+        i_aavePool.supply(address(i_usdc), amount, address(this), 0);
+
+
+        // 4. Emit event for merchant backend know if the order already paid
         emit PaymentSuccess(merchant, msg.sender, amount, orderId);
     }
 
@@ -126,35 +129,37 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         if (sharesToWithdraw == 0) revert AetherPay__ZeroAmount();
         if (s_merchantShares[msg.sender] < sharesToWithdraw) revert AetherPay__InsufficientShares();
 
+        // 1. CHECKS & MATH
         uint256 totalAssetsBefore = totalAssets();
 
-        // 1. Calculation of the total value (principal + yield) of the shares currently withdrawn
+        // Calculation of the total value (principal + yield) of the shares currently withdrawn
         uint256 assetsToWithdraw = (sharesToWithdraw * totalAssetsBefore) / s_totalShares;
 
-        // 2. Calculation of the proportion of Principal Money from the shares
+        // Calculation of the proportion of Principal Money from the shares
         uint256 principalToWithdraw = (sharesToWithdraw * s_merchantPrincipal[msg.sender]) / s_merchantShares[msg.sender];
 
-        // 3. Extraction yield and fee 10%
-        uint256 yield = 0;
-        uint256 fee = 0;
-
-        // Make sure there is no underflow if Aave experiences an anomaly (slash)
-        if (assetsToWithdraw > principalToWithdraw) {
-            yield = assetsToWithdraw - principalToWithdraw;
-            fee = (yield * PROTOCOL_FEE_BPS) / 10000;
-        }
-
-        uint256 userPayout = assetsToWithdraw - fee;
-
-        // 4. CEI (Checks-Effects-Interactions) Pattern: Update state before transfer
+        // 2. EFFECTS: Update state internal first
         s_merchantShares[msg.sender] -= sharesToWithdraw;
         s_merchantPrincipal[msg.sender] -= principalToWithdraw;
         s_totalShares -= sharesToWithdraw;
 
-        // 5. Withdraw USDC from Aave into AetherPay
-        i_aavePool.withdraw(address(i_usdc), assetsToWithdraw, address(this));
+        // 3. INTERACTIONS: Withdraw from Aave and catch the true value to avoid bug decimal rounding
+        uint256 actualWithdrawn = i_aavePool.withdraw(address(i_usdc), assetsToWithdraw, address(this)); 
 
-        // 6. Distribute the money
+        // 4. Extraction yield and fee 10%
+        uint256 yield = 0;
+        uint256 fee = 0;
+
+        // Make sure there is no underflow if Aave experiences an anomaly (slash)
+        if (actualWithdrawn > principalToWithdraw) {
+            yield = actualWithdrawn - principalToWithdraw;
+            fee = (yield * PROTOCOL_FEE_BPS) / 10000;
+        }
+
+        uint256 userPayout = actualWithdrawn - fee;
+
+
+        // 5. Distribute funds
         i_usdc.safeTransfer(msg.sender, userPayout);
         if (fee > 0) {
             i_usdc.safeTransfer(s_treasury, fee);

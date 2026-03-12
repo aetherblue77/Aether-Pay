@@ -29,7 +29,7 @@ const config: HardhatUserConfig = {
             },
         },
         localhost: {
-            chainId: 31337,
+            chainId: 8453,
         },
         baseSepolia: {
             url: BASE_SEPOLIA_RPC_URL || "",
@@ -44,9 +44,18 @@ const config: HardhatUserConfig = {
     },
     etherscan: {
         apiKey: {
-            sepolia: ETHERSCAN_API_KEY || "",
-            baseScan: ETHERSCAN_API_KEY || "",
+            baseSepolia: ETHERSCAN_API_KEY || "",
         },
+        customChains: [
+            {
+                network: "baseSepolia",
+                chainId: 84532,
+                urls: {
+                    apiURL: "https://api.etherscan.io/v2/api?chainid=84532",
+                    browserURL: "https://sepolia.basescan.org",
+                },
+            },
+        ],
     },
     gasReporter: {
         enabled: false,

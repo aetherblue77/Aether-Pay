@@ -3,12 +3,14 @@ import "@nomicfoundation/hardhat-toolbox"
 import * as dotenv from "dotenv"
 dotenv.config()
 
-const BASE_SEPOLIA_RPC_URL = process.env.BASE_SEPOLIA_RPC_URL
-const BASE_MAINNET_RPC_URL = process.env.BASE_MAINNET_RPC_URL
-const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL
-const PRIVATE_KEY = process.env.PRIVATE_KEY
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY
-const COINMARKETCAP_API_KEY = process.env.COINMARKETCAP_API_KEY
+const BASE_SEPOLIA_RPC_URL = process.env.BASE_SEPOLIA_RPC_URL || ""
+const BASE_MAINNET_RPC_URL = process.env.BASE_MAINNET_RPC_URL || ""
+const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL || ""
+const PRIVATE_KEY_DEPLOYER = process.env.PRIVATE_KEY_DEPLOYER || ""
+const PRIVATE_KEY_BUYER = process.env.PRIVATE_KEY_BUYER || ""
+const PRIVATE_KEY_MERCHANT = process.env.PRIVATE_KEY_MERCHANT || ""
+const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY || ""
+const COINMARKETCAP_API_KEY = process.env.COINMARKETCAP_API_KEY || ""
 
 const config: HardhatUserConfig = {
     solidity: {
@@ -24,7 +26,7 @@ const config: HardhatUserConfig = {
         hardhat: {
             chainId: 8453,
             forking: {
-                url: BASE_MAINNET_RPC_URL || "",
+                url: BASE_MAINNET_RPC_URL,
                 blockNumber: 43157454,
             },
         },
@@ -32,19 +34,23 @@ const config: HardhatUserConfig = {
             chainId: 8453,
         },
         baseSepolia: {
-            url: BASE_SEPOLIA_RPC_URL || "",
-            accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+            url: BASE_SEPOLIA_RPC_URL,
+            accounts:[
+                PRIVATE_KEY_DEPLOYER,
+                PRIVATE_KEY_BUYER,
+                PRIVATE_KEY_MERCHANT,
+            ],
             chainId: 84532,
         },
         sepolia: {
-            url: SEPOLIA_RPC_URL || "",
-            accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+            url: SEPOLIA_RPC_URL,
+            accounts: PRIVATE_KEY_DEPLOYER ? [PRIVATE_KEY_DEPLOYER] : [],
             chainId: 11155111,
         },
     },
     etherscan: {
         apiKey: {
-            baseSepolia: ETHERSCAN_API_KEY || "",
+            baseSepolia: ETHERSCAN_API_KEY,
         },
         customChains: [
             {

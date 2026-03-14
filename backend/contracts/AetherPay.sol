@@ -34,7 +34,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
     // 2. PARAMETER BUSINESS ($1M Engine)
     // ==========================================
     address public s_treasury; // Company Wallet
-    uint256 public constant PROTOCOL_FEE_BPS = 1000; // 10% in Basis Points (10,000 = 100%)
+    uint256 public constant PROTOCOL_FEE_BPS = 3000; // 30% in Basis Points (10,000 = 100%)
 
     // ==========================================
     // 3. ACCOUNTANT SYSTEM (System Shares)

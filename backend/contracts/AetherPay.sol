@@ -18,6 +18,7 @@ error AetherPay__InsufficientShares();
  * @title Aether Pay - Auto-Yield Payment Gateway
  * @author Jonathan Evan / Joev
  * @dev Architecture Vault Non-Custodial integrated with Aave V3
+ * Optimized with Infinite Approval (Gas Saver) & Clean Storage (No Bloat)
  */
 contract AetherPay is ReentrancyGuard, Ownable, Pausable {
     // Make sure Transfer Token not failed
@@ -73,6 +74,10 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         i_aUsdc = IERC20(_aUsdc);
         i_aavePool = IPool(_aavePool);
         s_treasury = _treasury;
+
+        // THE INFINITE APPROVAL HACK
+        // Approve Aave to spend all USDC from this contract
+        i_usdc.forceApprove(address(i_aavePool), type(uint256).max);
     }
 
     /**
@@ -109,9 +114,6 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         // Make sure buyer already called function "approve()" in frontend before this
         i_usdc.safeTransferFrom(msg.sender, address(this), amount);
 
-        // Give permission (Approve) Aave to get fund from this contract
-        i_usdc.safeIncreaseAllowance(address(i_aavePool), amount);
-
         // Deposit (Supply) fund to Aave V3
         // onBehalfOf = address(this) -> AetherPay holds the right to aUSDC, merchants are not
         i_aavePool.supply(address(i_usdc), amount, address(this), 0);
@@ -146,7 +148,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         // 3. INTERACTIONS: Withdraw from Aave and catch the true value to avoid bug decimal rounding
         uint256 actualWithdrawn = i_aavePool.withdraw(address(i_usdc), assetsToWithdraw, address(this)); 
 
-        // 4. Extraction yield and fee 10%
+        // 4. Extraction yield and fee 30%
         uint256 yield = 0;
         uint256 fee = 0;
 
@@ -189,7 +191,50 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         _unpause();
     }
 
+    // ==========================================
+    // VIEW FUNCTIONS
+    // ==========================================
     function totalAssets() public view returns (uint256) {
         return i_aUsdc.balanceOf(address(this));
+    }
+
+    function getMerchantBalance(address merchant) external view returns (uint256) {
+        if (s_totalShares == 0) return 0;
+        uint256 totalAsset = totalAssets();
+        return (s_merchantShares[merchant] * totalAsset) / s_totalShares;
+    }
+
+    function getMerchantPendingYield(address merchant) external view returns (uint256) {
+        if (s_totalShares == 0) return 0;
+        uint256 totalAsset = totalAssets();
+        uint256 currentValue = (s_merchantShares[merchant] * totalAsset) / s_totalShares;
+        uint256 principal = s_merchantPrincipal[merchant];
+
+        if (currentValue > principal) {
+            return currentValue - principal;
+        }
+
+        return 0;
+    }
+
+    function previewWithdrawal(address merchant, uint256 sharesToWithdraw) external view returns (
+        uint256 merchantPayout,
+        uint256 protocolFee,
+        uint256 yieldEarned
+    ) {
+        if (sharesToWithdraw == 0 || s_totalShares == 0) {
+            return (0, 0, 0);
+        }
+
+        uint256 totalAsset = totalAssets();
+        uint256 assetsToWithdraw = (sharesToWithdraw * totalAsset) / s_totalShares;
+        uint256 principalToWithdraw = (sharesToWithdraw * s_merchantPrincipal[merchant]) / s_merchantShares[merchant];
+
+        if (assetsToWithdraw > principalToWithdraw) {
+            yieldEarned = assetsToWithdraw - principalToWithdraw;
+            protocolFee = (yieldEarned * PROTOCOL_FEE_BPS) / 10000;
+        }
+
+        merchantPayout = assetsToWithdraw - protocolFee;
     }
 }

@@ -263,4 +263,90 @@ describe("Aether Pay - Mainnet Forking", function () {
                 .to.not.be.reverted
         })
     })
+
+    describe("View Functions (Frontend UI Data)", function () {
+        it("Return zero values when protocol is empty (Empty State)", async function () {
+            const {aetherPay, merchant} = await loadFixture(deployAetherPayFixture)
+
+            expect(await aetherPay.getMerchantBalance(merchant.address)).to.equal(0)
+            expect(await aetherPay.getMerchantPendingYield(merchant.address)).to.equal(0)
+
+            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, 100n)
+            expect(payout).to.equal(0)
+            expect(fee).to.equal(0)
+            expect(yieldEarned).to.equal(0)
+        })
+
+        it("Return exact principal values immediately after payment (Zero Yield)", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(),PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-001")
+
+            expect(await aetherPay.getMerchantBalance(merchant.address)).to.closeTo(PAYMENT_AMOUNT, 10n)
+
+            const shares = await aetherPay.s_merchantShares(merchant.address)
+            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, shares)
+
+            expect(payout).to.closeTo(PAYMENT_AMOUNT, 10n)
+            expect(fee).to.equal(0)
+            expect(yieldEarned).to.equal(0)
+        })
+
+        it("Return 0 pending yield if currentValue isn't greater than principal", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-001")
+
+            const pendingYield = await aetherPay.getMerchantPendingYield(merchant.address)
+
+            expect(pendingYield).to.equal(0)
+
+            const shares = await aetherPay.s_merchantShares(merchant.address)
+            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, shares)
+            
+            expect(yieldEarned).to.equal(0)
+            expect(fee).to.equal(0)
+            expect(payout).to.closeTo(PAYMENT_AMOUNT, 10n)
+        })
+
+        it("Return 0 values if merchant previews withdrawal of 0 shares", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-001")
+            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, 0n)
+
+            expect(payout).to.equal(0)
+            expect(fee).to.equal(0)
+            expect(yieldEarned).to.equal(0)
+        })
+
+        it("Return correct yield and fee calculations after time travel", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-002")
+
+            // Time Travel 1 Year to return yield
+            await time.increase(365 * 24 * 60 * 60)
+            
+            const currentBalance = await aetherPay.getMerchantBalance(merchant.address)
+            const pendingYield = await aetherPay.getMerchantPendingYield(merchant.address)
+
+            expect(currentBalance).to.be.greaterThan(PAYMENT_AMOUNT)
+            expect(pendingYield).to.be.greaterThan(0)
+            expect(currentBalance - PAYMENT_AMOUNT).to.equal(pendingYield)
+
+            const shares = await aetherPay.s_merchantShares(merchant.address)
+            const [payout,fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, shares)
+
+            expect(yieldEarned).to.equal(pendingYield)
+            expect(fee).to.be.greaterThan(0)
+
+            const expectedPayout = currentBalance - fee
+            expect(payout).to.equal(expectedPayout)
+        })
+    })
 })

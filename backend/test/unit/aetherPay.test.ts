@@ -92,11 +92,11 @@ describe("Aether Pay - Mainnet Forking", function () {
     })
 
     describe("Pay Function", function () {
-        it("Revert if amount 0 or merchant address 0", async function () {
+        it("Revert if amount is lower than min payment or merchant address 0", async function () {
             const { aetherPay, buyer } = await loadFixture(deployAetherPayFixture)
             await expect(
                 aetherPay.connect(buyer).pay(ethers.Wallet.createRandom().address, 0, "ORD-1"),
-            ).to.be.revertedWithCustomError(aetherPay, "AetherPay__ZeroAmount")
+            ).to.be.revertedWithCustomError(aetherPay, "AetherPay__AmountTooLow")
             await expect(
                 aetherPay.connect(buyer).pay(ethers.ZeroAddress, PAYMENT_AMOUNT, "ORD-1"),
             ).to.be.revertedWithCustomError(aetherPay, "AetherPay__InvalidMerchant")
@@ -264,14 +264,58 @@ describe("Aether Pay - Mainnet Forking", function () {
         })
     })
 
-    describe("View Functions (Frontend UI Data)", function () {
-        it("Return zero values when protocol is empty (Empty State)", async function () {
+    describe("View Functions (For On-chain / Specific Queries)", function () {
+        it("Return 0 values when protocol is empty (Empty State)", async function () {
             const {aetherPay, merchant} = await loadFixture(deployAetherPayFixture)
 
             expect(await aetherPay.getMerchantBalance(merchant.address)).to.equal(0)
             expect(await aetherPay.getMerchantPendingYield(merchant.address)).to.equal(0)
 
             const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, 100n)
+            expect(payout).to.equal(0)
+            expect(fee).to.equal(0)
+            expect(yieldEarned).to.equal(0)
+        })
+
+        it("Return 0 pending yield if currentValue isn't greater than principal", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-002")
+
+            const pendingYield = await aetherPay.getMerchantPendingYield(merchant.address)
+
+            expect(pendingYield).to.equal(0)
+
+            const shares = await aetherPay.s_merchantShares(merchant.address)
+            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, shares)
+            
+            expect(yieldEarned).to.equal(0)
+            expect(fee).to.equal(0)
+            expect(payout).to.closeTo(PAYMENT_AMOUNT, 10n)
+        })
+
+        it("Return 0 values if merchant previews withdrawal of 0 shares", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-003")
+            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, 0n)
+
+            expect(payout).to.equal(0)
+            expect(fee).to.equal(0)
+            expect(yieldEarned).to.equal(0)
+        })
+
+        it("Return 0 values if bystander merchant has 0 shares but protocol has active TVL", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+            const bystanderMerchant = ethers.Wallet.createRandom().address
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-005")
+
+            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(bystanderMerchant, 100n)
+
             expect(payout).to.equal(0)
             expect(fee).to.equal(0)
             expect(yieldEarned).to.equal(0)
@@ -293,41 +337,11 @@ describe("Aether Pay - Mainnet Forking", function () {
             expect(yieldEarned).to.equal(0)
         })
 
-        it("Return 0 pending yield if currentValue isn't greater than principal", async function () {
-            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
-
-            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
-            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-001")
-
-            const pendingYield = await aetherPay.getMerchantPendingYield(merchant.address)
-
-            expect(pendingYield).to.equal(0)
-
-            const shares = await aetherPay.s_merchantShares(merchant.address)
-            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, shares)
-            
-            expect(yieldEarned).to.equal(0)
-            expect(fee).to.equal(0)
-            expect(payout).to.closeTo(PAYMENT_AMOUNT, 10n)
-        })
-
-        it("Return 0 values if merchant previews withdrawal of 0 shares", async function () {
-            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
-
-            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
-            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-001")
-            const [payout, fee, yieldEarned] = await aetherPay.previewWithdrawal(merchant.address, 0n)
-
-            expect(payout).to.equal(0)
-            expect(fee).to.equal(0)
-            expect(yieldEarned).to.equal(0)
-        })
-
         it("Return correct yield and fee calculations after time travel", async function () {
             const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
 
             await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
-            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-002")
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-004")
 
             // Time Travel 1 Year to return yield
             await time.increase(365 * 24 * 60 * 60)
@@ -347,6 +361,62 @@ describe("Aether Pay - Mainnet Forking", function () {
 
             const expectedPayout = currentBalance - fee
             expect(payout).to.equal(expectedPayout)
+        })
+    })
+
+    describe("Aggregator View Function (Dasboard Data)", function () {
+        it("Return all zeros if merchant has no shares (Empty State)", async function () {
+            const {aetherPay, merchant} = await loadFixture(deployAetherPayFixture)
+            const dashboardData = await aetherPay.getMerchantDashboardData(merchant.address)
+            
+            expect(dashboardData.totalShares).to.equal(0)
+            expect(dashboardData.totalPrincipal).to.equal(0)
+            expect(dashboardData.currentBalance).to.equal(0)
+            expect(dashboardData.grossYield).to.equal(0)
+            expect(dashboardData.netYield).to.equal(0)
+        })
+
+        it("Return correct aggregated data immediately after payment (Zero Yield)", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-DASH-1")
+
+            const dashboardData = await aetherPay.getMerchantDashboardData(merchant.address)
+            
+            expect(dashboardData.totalPrincipal).to.equal(PAYMENT_AMOUNT)
+            expect(dashboardData.currentBalance).to.closeTo(PAYMENT_AMOUNT, 10n)
+            expect(dashboardData.grossYield).to.equal(0)
+            expect(dashboardData.netYield).to.equal(0)
+        })
+
+        it("Return correct gross and net yield calculations after time travel", async function () {
+            const {aetherPay, usdc, merchant, buyer} = await loadFixture(deployAetherPayFixture)
+
+            await usdc.connect(buyer).approve(await aetherPay.getAddress(), PAYMENT_AMOUNT)
+            await aetherPay.connect(buyer).pay(merchant.address, PAYMENT_AMOUNT, "ORD-DASH-2")
+
+            // Time Travel 1 Year
+            await time.increase(365 * 24 * 60 * 60)
+
+            const dashboardData = await aetherPay.getMerchantDashboardData(merchant.address)
+
+            // Balance must be greater thant principal
+            expect(dashboardData.currentBalance).to.be.greaterThan(PAYMENT_AMOUNT)
+
+            // Gross yield must be positive
+            expect(dashboardData.grossYield).to.be.greaterThan(0)
+
+            // Gross Yield = CurrentBalance - Principal
+            expect(dashboardData.grossYield).to.equal(dashboardData.currentBalance - dashboardData.totalPrincipal)
+
+            // Net yield must be less than gross yield
+            expect(dashboardData.netYield).to.be.lessThan(dashboardData.grossYield)
+            expect(dashboardData.netYield).to.be.greaterThan(0)
+            
+            // Make sure count of fee 30% accurately
+            const expectedFee = (dashboardData.grossYield * 3000n) / 10000n
+            expect(dashboardData.netYield).to.equal(dashboardData.grossYield - expectedFee)
         })
     })
 })

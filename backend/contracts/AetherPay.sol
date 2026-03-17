@@ -12,6 +12,7 @@ error AetherPay__ZeroAddress();
 error AetherPay__InvalidMerchant();
 error AetherPay__InvalidTreasury();
 error AetherPay__ZeroAmount();
+error AetherPay__AmountTooLow();
 error AetherPay__InsufficientShares();
 
 /**
@@ -36,6 +37,8 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
     // ==========================================
     address public s_treasury; // Company Wallet
     uint256 public constant PROTOCOL_FEE_BPS = 3000; // 30% in Basis Points (10,000 = 100%)
+    uint256 public constant FEE_DENOMINATOR = 10000; // Single Source of Truth for Fee Calculation
+    uint256 public constant MIN_PAYMENT = 100000; // 0.1 USDC (Anti-Dust Spam)
 
     // ==========================================
     // 3. ACCOUNTANT SYSTEM (System Shares)
@@ -88,7 +91,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
      */
     function pay(address merchant, uint256 amount, string calldata orderId) external nonReentrant whenNotPaused {
         if (merchant == address(0)) revert AetherPay__InvalidMerchant();
-        if (amount == 0) revert AetherPay__ZeroAmount();
+        if (amount < MIN_PAYMENT) revert AetherPay__AmountTooLow(); // Anti-Spam Protection
 
         // 1. Check & Math: Count all at the first time
         // Count total asset before inflow fund
@@ -155,7 +158,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         // Make sure there is no underflow if Aave experiences an anomaly (slash)
         if (actualWithdrawn > principalToWithdraw) {
             yield = actualWithdrawn - principalToWithdraw;
-            fee = (yield * PROTOCOL_FEE_BPS) / 10000;
+            fee = (yield * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
         }
 
         uint256 userPayout = actualWithdrawn - fee;
@@ -232,7 +235,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
 
         if (assetsToWithdraw > principalToWithdraw) {
             yieldEarned = assetsToWithdraw - principalToWithdraw;
-            protocolFee = (yieldEarned * PROTOCOL_FEE_BPS) / 10000;
+            protocolFee = (yieldEarned * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
         }
 
         merchantPayout = assetsToWithdraw - protocolFee;
@@ -243,7 +246,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
     // VIEW FUNCTIONS (AGGREGATOR - For Frontend Dashboard Load)
     // ==========================================
 
-    struct MerchantDasboard {
+    struct MerchantDashboard {
         uint256 totalShares;
         uint256 totalPrincipal;
         uint256 currentBalance;
@@ -254,9 +257,9 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
     /**
      * @dev One-click data fetcher for Frontend Dashboard
      */
-    function getMerchantDashboardData(address merchant) external view returns (MerchantDasboard memory) {
+    function getMerchantDashboardData(address merchant) external view returns (MerchantDashboard memory) {
         if (s_merchantShares[merchant] == 0) {
-            return MerchantDasboard(0, 0, 0, 0, 0);
+            return MerchantDashboard(0, 0, 0, 0, 0);
         }
 
         uint256 shares = s_merchantShares[merchant];
@@ -270,10 +273,10 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
 
         if (currentBalance > principal) {
             grossYield = currentBalance - principal;
-            uint256 fee = (grossYield * PROTOCOL_FEE_BPS) / 10000;
+            uint256 fee = (grossYield * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
             netYield = grossYield - fee;
         }
 
-        return MerchantDasboard(shares, principal, currentBalance, grossYield, netYield);
+        return MerchantDashboard(shares, principal, currentBalance, grossYield, netYield);
     }
 }

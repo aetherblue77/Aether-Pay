@@ -255,7 +255,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
      * @dev One-click data fetcher for Frontend Dashboard
      */
     function getMerchantDashboardData(address merchant) external view returns (MerchantDasboard memory) {
-        if (s_merchantShares[merchant] == 0 || s_totalShares == 0) {
+        if (s_merchantShares[merchant] == 0) {
             return MerchantDasboard(0, 0, 0, 0, 0);
         }
 

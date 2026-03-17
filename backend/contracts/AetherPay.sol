@@ -192,7 +192,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
     }
 
     // ==========================================
-    // VIEW FUNCTIONS
+    // VIEW FUNCTIONS (For On-chain / Specific Queries)
     // ==========================================
     function totalAssets() public view returns (uint256) {
         return i_aUsdc.balanceOf(address(this));
@@ -222,7 +222,7 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         uint256 protocolFee,
         uint256 yieldEarned
     ) {
-        if (sharesToWithdraw == 0 || s_totalShares == 0) {
+        if (sharesToWithdraw == 0 || s_totalShares == 0 || s_merchantShares[merchant] == 0) {
             return (0, 0, 0);
         }
 
@@ -236,5 +236,44 @@ contract AetherPay is ReentrancyGuard, Ownable, Pausable {
         }
 
         merchantPayout = assetsToWithdraw - protocolFee;
+    }
+
+
+    // ==========================================
+    // VIEW FUNCTIONS (AGGREGATOR - For Frontend Dashboard Load)
+    // ==========================================
+
+    struct MerchantDasboard {
+        uint256 totalShares;
+        uint256 totalPrincipal;
+        uint256 currentBalance;
+        uint256 grossYield;
+        uint256 netYield;
+    }
+
+    /**
+     * @dev One-click data fetcher for Frontend Dashboard
+     */
+    function getMerchantDashboardData(address merchant) external view returns (MerchantDasboard memory) {
+        if (s_merchantShares[merchant] == 0 || s_totalShares == 0) {
+            return MerchantDasboard(0, 0, 0, 0, 0);
+        }
+
+        uint256 shares = s_merchantShares[merchant];
+        uint256 principal = s_merchantPrincipal[merchant];
+
+        uint256 totalAsset = totalAssets();
+        uint256 currentBalance = (shares * totalAsset) / s_totalShares;
+
+        uint256 grossYield = 0;
+        uint256 netYield = 0;
+
+        if (currentBalance > principal) {
+            grossYield = currentBalance - principal;
+            uint256 fee = (grossYield * PROTOCOL_FEE_BPS) / 10000;
+            netYield = grossYield - fee;
+        }
+
+        return MerchantDasboard(shares, principal, currentBalance, grossYield, netYield);
     }
 }

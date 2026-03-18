@@ -7,7 +7,7 @@
         "test": "hardhat test",
         "compile": "hardhat compile",
         "coverage": "hardhat coverage",
-        "deploy:base": "hardhat ignition deploy ignition/modules/AetherPay.ts --network baseSepolia && hardhat run scripts/syncFrontend.ts --network baseSepolia"
+        "deploy:base": "hardhat ignition deploy ignition/modules/AetherPay.ts --network baseSepolia && hardhat run scripts/99-updateFrontend.ts --network baseSepolia"
     },
     "devDependencies": {
         "@aave/core-v3": "^1.19.3",
